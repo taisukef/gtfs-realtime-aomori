@@ -74,7 +74,11 @@ const layer = new deck.ScenegraphLayer({
   _animations: { '*': { speed: 5 } },
   sizeScale: 200,
   _lighting: 'pbr',
-  onClick: e => window.open(e.object.URL, "_blank"),
+  onClick: e => {
+    if (e.object.URL) {
+      window.open(e.object.URL, "_blank");
+    }
+  },
 });
 
 new deck.Deck({
