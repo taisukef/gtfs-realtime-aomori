@@ -1,0 +1,98 @@
+<!DOCTYPE html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width">
+<title>青森市営バスマップ - GTFSリアルタイム表示テスト</title>
+</head>
+<body style="background-color: #224;">
+<script type="module">
+import { deck } from 'https://code4fukui.github.io/deck-es/deck.js';
+import { GsiTerrainLayer } from 'https://code4fukui.github.io/deckgl-gsi-terrain-layer/index.js';
+import { CSV } from "https://js.sabae.cc/CSV.js";
+import { ProtocolBuffers } from "./ProtocolBuffers.js";
+import { DateTime } from "https://js.sabae.cc/DateTime.js";
+
+const proto = await ProtocolBuffers.load("gtfs-realtime.proto");
+const feedmessage = proto.lookup("FeedMessage");
+
+const fetchPB = async (fn) => {
+  const datapb = new Uint8Array(await (await fetch(fn)).arrayBuffer());
+  const feeds = feedmessage.decode(datapb);
+  //console.log(JSON.stringify(feeds, null, 2));
+  console.log(feeds);
+  return feeds;
+};
+
+const vpos = await fetchPB("VehiclePosition.pb");
+const tripup = await fetchPB("TripUpdate.pb"); // 遅れ情報
+
+const data = vpos.entity.map(f => {
+  const res = {
+    id: f.vehicle.vehicle.id,
+    timestamp: new DateTime(new Date(f.vehicle.timestamp * 1000)).toString(),
+    tripId: f.vehicle.trip.tripId,
+    coordinates: [f.vehicle.position.longitude, f.vehicle.position.latitude],
+    label: f.vehicle.vehicle.label,
+    licensePlate: f.vehicle.vehicle.licensePlate,
+  };
+  const tp = tripup.entity.find(t => t.tripUpdate.trip.tripId == res.tripId);
+  if (tp) {
+    const st = tp.tripUpdate.stopTimeUpdate;
+    if (st.length == 1) {
+      res.stopSequence = st[0].stopSequence;
+      res.departureDelay = st[0].departure?.delay;
+    } else {
+      console.log("stopTimeUpdate.length != 1", st)
+    }
+  }
+  return res;
+});
+
+const tooltipHandler = (e) => {
+  if (!e || !e.object) {
+    return null;
+  }
+  const obj = e.object;
+  const trs = Object.keys(obj)
+    .filter(key => obj[key])
+    .map(key => `<tr><th style="text-align:right">${key}</th><td>${obj[key]}</td></tr>`);
+  const html = ["<table>", ...trs, "</table>"].join("");
+  return {
+    html,
+    style: {
+      fontSize: "0.5em"
+    }
+  };
+};
+
+let isHovering = false;
+const layer = new deck.ScenegraphLayer({
+  id: 'scenegraph-layer',
+  data,
+  pickable: true,
+  // https://github.com/KhronosGroup/glTF-Sample-Models/
+  scenegraph: 'https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Models/master/2.0/BoxAnimated/glTF-Binary/BoxAnimated.glb',
+  getPosition: d => d.coordinates,
+  getOrientation: d => [0, Math.random() * 180, 90],
+  _animations: { '*': { speed: 5 } },
+  sizeScale: 200,
+  _lighting: 'pbr',
+  onClick: e => window.open(e.object.URL, "_blank"),
+});
+
+new deck.Deck({
+  initialViewState: {
+    longitude: 140.75,
+    latitude: 40.81,
+    zoom: 12,
+    bearing: 20,
+    pitch: 30,
+    maxPitch: 85,
+  },
+  controller: true,
+  layers: [layer, new GsiTerrainLayer()],
+  onHover: e => isHovering = Boolean(e.object),
+  getCursor: e => e.isDragging ? 'grabbing' : (isHovering ? 'pointer' : 'grab'),
+  getTooltip: tooltipHandler,
+});
+
+</script>
+</body>
+</html>
